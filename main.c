@@ -110,9 +110,9 @@ int main(int argc, char *argv[])
     // One thread will be responsible for receiving messages and sending the current values of x, y and z to the node that requested it
     // The other threads will calculate the distances and update the global variables
 
-    #pragma omp parallel num_threads(num_threads) nowait     
+    #pragma omp parallel num_threads(4)   
     {
-        #pragma omp task master
+        #pragma omp master
         {
             while(true)
             {
@@ -124,58 +124,62 @@ int main(int argc, char *argv[])
                 MPI_Send(z, num_points/num_nodes, MPI_INT, src, tag, MPI_COMM_WORLD);
             }
         }
-    }
 
-    // For every point in mine x, y and z calculate the distances, fetching when needed and updating the global variables
-    for(int p = 0; p < num_points/num_nodes; p++)
-    {
-        for(int i = rank; i < num_nodes; i++)
+        #pragma omp single
         {
-            if(i != rank)
+            // For every point in mine x, y and z calculate the distances, fetching when needed and updating the global variables
+            for(int p = 0; p < num_points/num_nodes; p++)
             {
-                MPI_Send(&rank, 1, MPI_INT, i, tag, MPI_COMM_WORLD);
+                for(int i = rank; i < num_nodes; i++)
+                {
+                    if(i != rank)
+                    {
+                        MPI_Send(&rank, 1, MPI_INT, i, tag, MPI_COMM_WORLD);
 
-                MPI_Recv(x_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
-                MPI_Recv(y_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
-                MPI_Recv(z_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
+                        MPI_Recv(x_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
+                        MPI_Recv(y_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
+                        MPI_Recv(z_aux, num_points/num_nodes, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
+                    }
+
+                    int start_j = i == rank ? p + 1 : 0;
+
+                    for(int j = start_j; j < num_points/num_nodes; j++)
+                    {
+                        int manhattan_dist = manhattan_distance(x[p], y[p], z[p], x_aux[j], y_aux[j], z_aux[j]);
+                        double euclidean_dist = euclidean_distance(x[p], y[p], z[p], x_aux[j], y_aux[j], z_aux[j]);
+
+                        if(manhattan_dist < min_manhattan_per_point)
+                            min_manhattan_per_point = manhattan_dist;
+
+                        if(manhattan_dist > max_manhattan_per_point)
+                            max_manhattan_per_point = manhattan_dist;
+
+                        if(euclidean_dist < min_euclidean_per_point)
+                            min_euclidean_per_point = euclidean_dist;
+
+                        if(euclidean_dist > max_euclidean_per_point)
+                            max_euclidean_per_point = euclidean_dist;
+                    }
+
+                    if(min_manhattan_per_point < min_manhattan)
+                        min_manhattan = min_manhattan_per_point;
+
+                    if(max_manhattan_per_point > max_manhattan)
+                        max_manhattan = max_manhattan_per_point;
+
+                    if(min_euclidean_per_point < min_euclidean)
+                        min_euclidean = min_euclidean_per_point;
+
+                    if(max_euclidean_per_point > max_euclidean)
+                        max_euclidean = max_euclidean_per_point;
+
+                    sum_min_manhattan += min_manhattan_per_point;
+                    sum_max_manhattan += max_manhattan_per_point;
+                    sum_min_euclidean += min_euclidean_per_point;
+                    sum_max_euclidean += max_euclidean_per_point;
+                }
             }
-
-            int start_j = i == rank ? p + 1 : 0;
-
-            for(int j = start_j; j < num_points/num_nodes; j++)
-            {
-                int manhattan_dist = manhattan_distance(x[p], y[p], z[p], x_aux[j], y_aux[j], z_aux[j]);
-                double euclidean_dist = euclidean_distance(x[p], y[p], z[p], x_aux[j], y_aux[j], z_aux[j]);
-
-                if(manhattan_dist < min_manhattan_per_point)
-                    min_manhattan_per_point = manhattan_dist;
-
-                if(manhattan_dist > max_manhattan_per_point)
-                    max_manhattan_per_point = manhattan_dist;
-
-                if(euclidean_dist < min_euclidean_per_point)
-                    min_euclidean_per_point = euclidean_dist;
-
-                if(euclidean_dist > max_euclidean_per_point)
-                    max_euclidean_per_point = euclidean_dist;
-            }
-
-            if(min_manhattan_per_point < min_manhattan)
-                min_manhattan = min_manhattan_per_point;
-
-            if(max_manhattan_per_point > max_manhattan)
-                max_manhattan = max_manhattan_per_point;
-
-            if(min_euclidean_per_point < min_euclidean)
-                min_euclidean = min_euclidean_per_point;
-
-            if(max_euclidean_per_point > max_euclidean)
-                max_euclidean = max_euclidean_per_point;
-
-            sum_min_manhattan += min_manhattan_per_point;
-            sum_max_manhattan += max_manhattan_per_point;
-            sum_min_euclidean += min_euclidean_per_point;
-            sum_max_euclidean += max_euclidean_per_point;
+            
         }
     }
 
