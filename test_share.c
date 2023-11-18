@@ -116,7 +116,6 @@ int main(int argc, char *argv[])
     # The first part, of sending all the needed information to the processes is finished
     printf("\n\n\n\n\n\n");
 	
-
     // Free allocation
     free(x);
     free(y);
