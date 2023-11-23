@@ -38,9 +38,10 @@ int main(int argc, char *argv[])
     int num_threads = atoi(argv[3]);
     int num_points = n * n;
 
-    printf("n: %d | seed: %d | num_threads: %d\n", n, seed, num_threads);
+    //printf("n: %d | seed: %d | num_threads: %d\n", n, seed, num_threads);
 
     srand(seed);
+    omp_set_nested(1);
 
     // Initialize MPI
     int num_nodes, rank, src, dest, tag = 0, ret;
@@ -60,10 +61,10 @@ int main(int argc, char *argv[])
     int num_points_per_node = num_points / num_nodes;
 
     // Global variables
-    int global_min_manhattan = INT_MAX, sum_min_manhattan = 0;
-    int global_max_manhattan = INT_MIN, sum_max_manhattan = 0;
-    double global_min_euclidean = DBL_MAX, sum_min_euclidean = 0.0;
-    double global_max_euclidean = DBL_MIN, sum_max_euclidean = 0.0;
+    int local_min_manhattan = INT_MAX, sum_min_manhattan = 0;
+    int local_max_manhattan = INT_MIN, sum_max_manhattan = 0;
+    double local_min_euclidean = DBL_MAX, sum_min_euclidean = 0.0;
+    double local_max_euclidean = DBL_MIN, sum_max_euclidean = 0.0;
 
     // Temporary vector for Min and Max of each point on each process
     int *min_manhattan_per_point_vector = (int *)malloc(sizeof(int) * num_points_per_node);
@@ -79,7 +80,7 @@ int main(int argc, char *argv[])
         max_euclidean_per_point_vector[i] = DBL_MIN;
     }
 
-    printf("Each process will have vector of size %d\n", (num_points_per_node));
+    //printf("Each process will have vector of size %d\n", (num_points_per_node));
 
     // Node 0 generates x,y and z and distribute them equally to all nodes
     int *x = (int *)malloc(sizeof(int) * num_points_per_node);
@@ -196,7 +197,7 @@ int main(int argc, char *argv[])
 
     // The first part, of sending all the needed information to the processes is finished
     MPI_Barrier(MPI_COMM_WORLD);
-    printf("\n\n\n");
+    //printf("\n\n\n");
 
     /*for (int i = 0; i < num_points_per_node; i++)
     {
@@ -211,7 +212,15 @@ int main(int argc, char *argv[])
 
     double *manhattan_euclidean_min_max = (double *)malloc(sizeof(double) * (4 * num_points_per_node));
 
-    #pragma omp parallel num_threads(num_threads)
+    double min_manhattan = DBL_MAX;
+    double max_manhattan = DBL_MIN;
+    double min_euclidean = DBL_MAX;
+    double max_euclidean = DBL_MIN;
+
+    // Make a broadcast of the values of x, y and z to all nodes
+    int point[3] = {};
+
+    #pragma omp parallel num_threads(num_threads) private(point)
     {
         #pragma omp for
         for(int j = 0; j < num_points_per_node; j++)
@@ -221,61 +230,55 @@ int main(int argc, char *argv[])
             manhattan_euclidean_min_max[4*j+2] = DBL_MAX;
             manhattan_euclidean_min_max[4*j+3] = DBL_MIN;
         }
-    }
 
-
-    double min_manhattan = DBL_MAX;
-    double max_manhattan = DBL_MIN;
-    double min_euclidean = DBL_MAX;
-    double max_euclidean = DBL_MIN;
-
-    for(int i = 0; i < num_points_per_node; i++)
-    {
-        min_manhattan = DBL_MAX;
-        max_manhattan = DBL_MIN;
-        min_euclidean = DBL_MAX;
-        max_euclidean = DBL_MIN;
-
-        //#pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
-        for(int j = i+1; j < num_points_per_node; j++)
+        #pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
+        for(int i = 0; i < num_points_per_node; i++)
         {
-            double manhattan = abs(x[i] - x[j]) + abs(y[i] - y[j]) + abs(z[i] - z[j]);
-            //printf("manhattan: %d\n", manhattan);
-            double euclidean = sqrt(pow(x[i] - x[j], 2) + pow(y[i] - y[j], 2) + pow(z[i] - z[j], 2));
-            //printf("euclidean: %lf\n", euclidean);
+            min_manhattan = DBL_MAX;
+            max_manhattan = DBL_MIN;
+            min_euclidean = DBL_MAX;
+            max_euclidean = DBL_MIN;
 
-            // Now, check if the results are lower than the minimum and higher than the maximum
-            if(manhattan < min_manhattan)
-                min_manhattan = manhattan;
-            if(manhattan > max_manhattan)
-                max_manhattan = manhattan;
-            if(euclidean < min_euclidean)
-                min_euclidean = euclidean;
-            if(euclidean > max_euclidean)
-                max_euclidean = euclidean;
+            for(int j = i+1; j < num_points_per_node; j++)
+            {
+                double manhattan = abs(x[i] - x[j]) + abs(y[i] - y[j]) + abs(z[i] - z[j]);
+                //printf("manhattan: %d\n", manhattan);
+                double euclidean = sqrt(pow(x[i] - x[j], 2) + pow(y[i] - y[j], 2) + pow(z[i] - z[j], 2));
+                //printf("euclidean: %lf\n", euclidean);
+
+                // Now, check if the results are lower than the minimum and higher than the maximum
+                if(manhattan < min_manhattan)
+                    min_manhattan = manhattan;
+                if(manhattan > max_manhattan)
+                    max_manhattan = manhattan;
+                if(euclidean < min_euclidean)
+                    min_euclidean = euclidean;
+                if(euclidean > max_euclidean)
+                    max_euclidean = euclidean;
+            }
+
+
+            if(min_manhattan < manhattan_euclidean_min_max[4*i])
+                manhattan_euclidean_min_max[4*i] = min_manhattan;
+            if(max_manhattan > manhattan_euclidean_min_max[4*i+1])
+                manhattan_euclidean_min_max[4*i+1] = max_manhattan;
+            if(min_euclidean < manhattan_euclidean_min_max[4*i+2])
+                manhattan_euclidean_min_max[4*i+2] = min_euclidean;
+            if(max_euclidean > manhattan_euclidean_min_max[4*i+3])
+                manhattan_euclidean_min_max[4*i+3] = max_euclidean;
+            
+            
+            //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i, manhattan_euclidean_min_max[4*i]);
+            //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i+1, manhattan_euclidean_min_max[4*i+1]);
         }
-
-        if(min_manhattan < manhattan_euclidean_min_max[4*i])
-            manhattan_euclidean_min_max[4*i] = min_manhattan;
-        if(max_manhattan > manhattan_euclidean_min_max[4*i+1])
-            manhattan_euclidean_min_max[4*i+1] = max_manhattan;
-        if(min_euclidean < manhattan_euclidean_min_max[4*i+2])
-            manhattan_euclidean_min_max[4*i+2] = min_euclidean;
-        if(max_euclidean > manhattan_euclidean_min_max[4*i+3])
-            manhattan_euclidean_min_max[4*i+3] = max_euclidean;
-        
-        
-        //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i, manhattan_euclidean_min_max[4*i]);
-        //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i+1, manhattan_euclidean_min_max[4*i+1]);
     }
 
-    // Make a broadcast of the values of x, y and z to all nodes
-    int point[3] = {};
     double manhattan_euclidean_min_max_point[4] = {};
 
-    #pragma omp parallel num_threads(1) private(i, j, k, point, manhattan_euclidean_min_max_point) default(shared)
+    #pragma omp parallel num_threads(num_threads) private(i, j, k, point, manhattan_euclidean_min_max_point) default(shared)
     {
         // Broadcast the values of x, y and z to all nodes
+        #pragma omp master
         for(int i = 0; i < num_points_per_node; i++)
         {
             point[0] = x[i];
@@ -284,7 +287,7 @@ int main(int argc, char *argv[])
             MPI_Bcast(&point, 3, MPI_INT, rank, MPI_COMM_WORLD);
         }
 
-        #pragma omp for collapse(2)
+        #pragma omp single
         for(int j = rank + 1; j < num_nodes; j++)
         {
             for(int k = 0; k < num_points_per_node; k++)
@@ -313,7 +316,7 @@ int main(int argc, char *argv[])
         }
 
         // Request distance calculations to all nodes
-        #pragma omp for reduction(min : global_min_manhattan) reduction(max : global_max_manhattan) reduction(min : global_min_euclidean) reduction(max : global_max_euclidean) reduction(+:sum_min_manhattan) reduction(+:sum_max_manhattan) reduction(+:sum_min_euclidean) reduction(+:sum_max_euclidean)
+        #pragma omp for nowait reduction(min : local_min_manhattan) reduction(max : local_max_manhattan) reduction(min : local_min_euclidean) reduction(max : local_max_euclidean) reduction(+:sum_min_manhattan) reduction(+:sum_max_manhattan) reduction(+:sum_min_euclidean) reduction(+:sum_max_euclidean)
         for(int i = 0; i < num_points_per_node; i++)
         {
             if(manhattan_euclidean_min_max[4*i] != DBL_MAX && manhattan_euclidean_min_max[4*i+1] != DBL_MAX && manhattan_euclidean_min_max[4*i+2] != DBL_MAX && manhattan_euclidean_min_max[4*i+3] != DBL_MAX)
@@ -327,24 +330,26 @@ int main(int argc, char *argv[])
             //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i, manhattan_euclidean_min_max[4*i]);
             //printf("manhattan_euclidean_min_max[%d]: %lf\n", 4*i+1, manhattan_euclidean_min_max[4*i+1]);
 
-            if(manhattan_euclidean_min_max[4*i] < global_min_manhattan)
-                global_min_manhattan = manhattan_euclidean_min_max[4*i];
-            if(manhattan_euclidean_min_max[4*i+1] > global_max_manhattan)
-                global_max_manhattan = manhattan_euclidean_min_max[4*i+1];
-            if(manhattan_euclidean_min_max[4*i+2] < global_min_euclidean)
-                global_min_euclidean = manhattan_euclidean_min_max[4*i+2];
-            if(manhattan_euclidean_min_max[4*i+3] > global_max_euclidean)
-                global_max_euclidean = manhattan_euclidean_min_max[4*i+3];
+            if(manhattan_euclidean_min_max[4*i] < local_min_manhattan)
+                local_min_manhattan = manhattan_euclidean_min_max[4*i];
+            if(manhattan_euclidean_min_max[4*i+1] > local_max_manhattan)
+                local_max_manhattan = manhattan_euclidean_min_max[4*i+1];
+            if(manhattan_euclidean_min_max[4*i+2] < local_min_euclidean)
+                local_min_euclidean = manhattan_euclidean_min_max[4*i+2];
+            if(manhattan_euclidean_min_max[4*i+3] > local_max_euclidean)
+                local_max_euclidean = manhattan_euclidean_min_max[4*i+3];
         }
 
         // Respond to the request of the other nodes
-        #pragma omp for
+        #pragma omp single
         for (int i = rank - 1; i >= 0; i--)
         {
             for(int j = 0; j < num_points_per_node; j++)
             {            
-                // Recieve the broadcast message 
+                // Recieve the broadcast message
                 MPI_Bcast(&point, 3, MPI_INT, i, MPI_COMM_WORLD);
+
+                //printf("Rank %d received from rank %d: %d %d %d\n", rank, i, point[0], point[1], point[2]);
 
                 min_manhattan = DBL_MAX;
                 max_manhattan = DBL_MIN;
@@ -372,7 +377,6 @@ int main(int argc, char *argv[])
                 }
 
                 // Send the results to the node that requested it with MPI_Send
-
                 manhattan_euclidean_min_max_point[0] = min_manhattan;
                 manhattan_euclidean_min_max_point[1] = max_manhattan;
                 manhattan_euclidean_min_max_point[2] = min_euclidean;
@@ -391,194 +395,30 @@ int main(int argc, char *argv[])
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // Print the global min and max euclidean and manhattan
-    //printf("global_min_manhattan: %d\n", global_min_manhattan);
-    //printf("global_max_manhattan: %d\n", global_max_manhattan);
-    //printf("global_min_euclidean: %lf\n", global_min_euclidean);
-    //printf("global_max_euclidean: %lf\n", global_max_euclidean);
+    int global_min_manhattan = 0;
+    int global_max_manhattan = 0;
+    double global_min_euclidean = 0.0;
+    double global_max_euclidean = 0.0;
+    int total_sum_min_manhattan = 0;
+    int total_sum_max_manhattan = 0;
+    double total_sum_min_euclidean = 0.0;
+    double total_sum_max_euclidean = 0.0;
 
-    // Gather para o rank 0 dos minimos, máximos e soma de minimos e máximos encontrados por cada processo
-    int *final_min_manhattan = (int *)malloc(sizeof(int) * num_nodes);
-    int *final_max_manhattan = (int *)malloc(sizeof(int) * num_nodes);
-    double *final_min_euclidean = (double *)malloc(sizeof(double) * num_nodes);
-    double *final_max_euclidean = (double *)malloc(sizeof(double) * num_nodes);
-    int *gather_sum_min_manhattan = (int *)malloc(sizeof(int) * num_nodes);
-    int *gather_sum_max_manhattan = (int *)malloc(sizeof(int) * num_nodes);
-    double *gather_sum_min_euclidean = (double *)malloc(sizeof(double) * num_nodes);
-    double *gather_sum_max_euclidean = (double *)malloc(sizeof(double) * num_nodes);
+    MPI_Reduce(&sum_min_manhattan, &total_sum_min_manhattan, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&sum_max_manhattan, &total_sum_max_manhattan, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&sum_min_euclidean, &total_sum_min_euclidean, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&sum_max_euclidean, &total_sum_max_euclidean, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
-    MPI_Gather(&global_min_manhattan, 1, MPI_INT, final_min_manhattan, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&global_max_manhattan, 1, MPI_INT, final_max_manhattan, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&global_min_euclidean, 1, MPI_DOUBLE, final_min_euclidean, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Gather(&global_max_euclidean, 1, MPI_DOUBLE, final_max_euclidean, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Gather(&sum_min_manhattan, 1, MPI_INT, gather_sum_min_manhattan, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&sum_max_manhattan, 1, MPI_INT, gather_sum_max_manhattan, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&sum_min_euclidean, 1, MPI_DOUBLE, gather_sum_min_euclidean, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Gather(&sum_max_euclidean, 1, MPI_DOUBLE, gather_sum_max_euclidean, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&local_min_manhattan, &global_min_manhattan, 1, MPI_INT, MPI_MIN, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&local_max_manhattan, &global_max_manhattan, 1, MPI_INT, MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&local_min_euclidean, &global_min_euclidean, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&local_max_euclidean, &global_max_euclidean, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
     if (rank == 0)
     {
-        int global_min_manhattan = INT_MAX;
-        int global_max_manhattan = INT_MIN;
-        double global_min_euclidean = DBL_MAX;
-        double global_max_euclidean = DBL_MIN;
-        int total_sum_min_manhattan = 0;
-        int total_sum_max_manhattan = 0;
-        double total_sum_min_euclidean = 0.0;
-        double total_sum_max_euclidean = 0.0;
-
-        for (int i = 0; i < num_nodes; i++)
-        {
-            if (final_min_manhattan[i] < global_min_manhattan)
-                global_min_manhattan = final_min_manhattan[i];
-            if (final_max_manhattan[i] > global_max_manhattan)
-                global_max_manhattan = final_max_manhattan[i];
-            if (final_min_euclidean[i] < global_min_euclidean)
-                global_min_euclidean = final_min_euclidean[i];
-            if (final_max_euclidean[i] > global_max_euclidean)
-                global_max_euclidean = final_max_euclidean[i];
-            total_sum_min_manhattan += gather_sum_min_manhattan[i];
-            total_sum_max_manhattan += gather_sum_max_manhattan[i];
-            total_sum_min_euclidean += gather_sum_min_euclidean[i];
-            total_sum_max_euclidean += gather_sum_max_euclidean[i];
-        }
-
         printf("Distância de Manhattan mínima: %d (soma min: %d) e máxima: %d (soma max: %d).\n", global_min_manhattan, total_sum_min_manhattan, global_max_manhattan, total_sum_max_manhattan);
         printf("Distância Euclidiana mínima: %.2lf (soma min: %.2lf) e máxima: %.2lf (soma max: %.2lf).\n", global_min_euclidean, total_sum_min_euclidean, global_max_euclidean, total_sum_max_euclidean);
     }
-
-
-/*#pragma omp for nowait
-        for (int i = rank - 1; i >= 0; i--)
-        {
-            // Receive message from any node requesting mine x,y and z and send to it
-            MPI_Recv(&src, 1, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
-
-            printf("Rank %d received a request from rank %d\n", rank, src);
-
-            MPI_Send(x, (num_points_per_node), MPI_INT, i, i + 1, MPI_COMM_WORLD);
-            MPI_Send(y, (num_points_per_node), MPI_INT, i, i + 2, MPI_COMM_WORLD);
-            MPI_Send(z, (num_points_per_node), MPI_INT, i, i + 3, MPI_COMM_WORLD);
-        }
-
-#pragma omp for nowait
-        for (int i = rank; i < num_nodes; i++)
-        {
-            if (i == rank)
-            {
-                for (int j = 0; j < (num_points_per_node); j++)
-                {
-                    min_manhattan = INT_MAX;
-                    max_manhattan = INT_MIN;
-                    min_euclidean = DBL_MAX;
-                    max_euclidean = DBL_MIN;
-
-#pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
-                    for (int k = 0; k < (num_points_per_node); k++)
-                    {
-                        if (j == k)
-                            continue;
-
-                        int manhattan = abs(x[j] - x[k]) + abs(y[j] - y[k]) + abs(z[j] - z[k]);
-                        double euclidean = sqrt(pow(x[j] - x[k], 2) + pow(y[j] - y[k], 2) + pow(z[j] - z[k], 2));
-                        // printf("Manhattan: %d | Euclidean: %lf\n", manhattan, euclidean);
-
-                        if (manhattan < min_manhattan)
-                            min_manhattan = manhattan;
-                        if (manhattan > max_manhattan)
-                            max_manhattan = manhattan;
-                        if (euclidean < min_euclidean)
-                            min_euclidean = euclidean;
-                        if (euclidean > max_euclidean)
-                            max_euclidean = euclidean;
-                    }
-                
-                    if (min_manhattan < min_manhattan_per_point_vector[j])
-                        min_manhattan_per_point_vector[j] = min_manhattan;
-                    if (max_manhattan > max_manhattan_per_point_vector[j])
-                        max_manhattan_per_point_vector[j] = max_manhattan;
-                    if (min_euclidean < min_euclidean_per_point_vector[j])
-                        min_euclidean_per_point_vector[j] = min_euclidean;
-                    if (max_euclidean > max_euclidean_per_point_vector[j])
-                        max_euclidean_per_point_vector[j] = max_euclidean;
-                }
-            }
-            else
-            {
-                printf("Rank %d will request data from rank %d\n", rank, i);
-                MPI_Send(&rank, 1, MPI_INT, i, tag, MPI_COMM_WORLD);
-
-                MPI_Recv(x_aux, (num_points_per_node), MPI_INT, i, rank + 1, MPI_COMM_WORLD, &status);
-                printf("Rank %d recieved X from rank %d\n", rank, i);
-
-                MPI_Recv(y_aux, (num_points_per_node), MPI_INT, i, rank + 2, MPI_COMM_WORLD, &status);
-                printf("Rank %d recieved Y from rank %d\n", rank, i);
-
-                MPI_Recv(z_aux, (num_points_per_node), MPI_INT, i, rank + 3, MPI_COMM_WORLD, &status);
-                printf("Rank %d recieved Z from rank %d\n", rank, i);
-
-                for (int j = 0; j < (num_points_per_node); j++)
-                {
-                    min_manhattan = INT_MAX;
-                    max_manhattan = INT_MIN;
-                    min_euclidean = DBL_MAX;
-                    max_euclidean = DBL_MIN;
-
-                    #pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
-                    for (int k = 0; k < (num_points_per_node); k++)
-                    {
-                        int manhattan = abs(x[j] - x_aux[k]) + abs(y[j] - y_aux[k]) + abs(z[j] - z_aux[k]);
-                        double euclidean = sqrt(pow(x[j] - x_aux[k], 2) + pow(y[j] - y_aux[k], 2) + pow(z[j] - z_aux[k], 2));
-                        printf("Manhattan: %d | Euclidean: %lf\n", manhattan, euclidean);
-
-                        if (manhattan < min_manhattan)
-                            min_manhattan = manhattan;
-                        if (manhattan > max_manhattan)
-                            max_manhattan = manhattan;
-                        if (euclidean < min_euclidean)
-                            min_euclidean = euclidean;
-                        if (euclidean > max_euclidean)
-                            max_euclidean = euclidean;
-                    }
-
-                    if (min_manhattan < min_manhattan_per_point_vector[j])
-                        min_manhattan_per_point_vector[j] = min_manhattan;
-                    if (max_manhattan > max_manhattan_per_point_vector[j])
-                        max_manhattan_per_point_vector[j] = max_manhattan;
-                    if (min_euclidean < min_euclidean_per_point_vector[j])
-                        min_euclidean_per_point_vector[j] = min_euclidean;
-                    if (max_euclidean > max_euclidean_per_point_vector[j])
-                        max_euclidean_per_point_vector[j] = max_euclidean;
-                }
-            }
-        }
-    }*/
-
-    // Get the sum of the mins and maxs of each point
-    /*
-    for (int i = 0; i < (num_points_per_node); i++)
-    {
-        sum_min_manhattan += min_manhattan_per_point_vector[i];
-        sum_max_manhattan += max_manhattan_per_point_vector[i];
-        sum_min_euclidean += min_euclidean_per_point_vector[i];
-        sum_max_euclidean += max_euclidean_per_point_vector[i];
-
-        if (min_manhattan_per_point_vector[i] < min_manhattan)
-            min_manhattan = min_manhattan_per_point_vector[i];
-        if (max_manhattan_per_point_vector[i] > max_manhattan)
-            max_manhattan = max_manhattan_per_point_vector[i];
-        if (min_euclidean_per_point_vector[i] < min_euclidean)
-            min_euclidean = min_euclidean_per_point_vector[i];
-        if (max_euclidean_per_point_vector[i] > max_euclidean)
-            max_euclidean = max_euclidean_per_point_vector[i];
-    }
-    printf("in_euclidean_per_point_vector: ");
-    for (int i = 0; i < num_nodes; i++)
-    {
-        printf("%.2lf ", min_euclidean_per_point_vector[i]);
-    }
-    printf("\n");
-    */
 
     // Free of all point vectors -> Esta parte da memória alocada torna-se agora, inútil
     free(x);
