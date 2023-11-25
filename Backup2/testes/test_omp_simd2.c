@@ -41,7 +41,6 @@ int main(int argc, char *argv[])
     //printf("n: %d | seed: %d | num_threads: %d\n", n, seed, num_threads);
 
     srand(seed);
-    omp_set_nested(1);
 
     // Initialize MPI
     int num_nodes, rank, src, dest, tag = 0, ret;
@@ -196,7 +195,14 @@ int main(int argc, char *argv[])
     }
 
     // The first part, of sending all the needed information to the processes is finished
-    MPI_Barrier(MPI_COMM_WORLD);
+
+    free(x_aux);
+    x_aux = NULL;
+    free(y_aux);
+    y_aux = NULL;
+    free(z_aux);
+    z_aux = NULL;
+    
     //printf("\n\n\n");
 
     /*for (int i = 0; i < num_points_per_node; i++)
@@ -222,7 +228,7 @@ int main(int argc, char *argv[])
 
     #pragma omp parallel num_threads(num_threads) private(point)
     {
-        #pragma omp for
+        #pragma omp for nowait
         for(int j = 0; j < num_points_per_node; j++)
         {
             manhattan_euclidean_min_max[4*j] = DBL_MAX;
@@ -278,13 +284,14 @@ int main(int argc, char *argv[])
     #pragma omp parallel num_threads(num_threads) private(i, j, k, point, manhattan_euclidean_min_max_point) default(shared)
     {
         // Broadcast the values of x, y and z to all nodes
-        #pragma omp for
+        #pragma omp master
         for(int i = 0; i < num_points_per_node; i++)
         {
             point[0] = x[i];
             point[1] = y[i];
             point[2] = z[i];
-            #pragma omp critical
+
+            //#pragma omp critical (broadcast)
             MPI_Bcast(&point, 3, MPI_INT, rank, MPI_COMM_WORLD);
         }
 
@@ -394,8 +401,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
-
     int global_min_manhattan = 0;
     int global_max_manhattan = 0;
     double global_min_euclidean = 0.0;
@@ -428,12 +433,6 @@ int main(int argc, char *argv[])
     y = NULL;
     free(z);
     z = NULL;
-    free(x_aux);
-    x_aux = NULL;
-    free(y_aux);
-    y_aux = NULL;
-    free(z_aux);
-    z_aux = NULL;
 
     /*free(min_manhattan_per_point_vector);
     min_manhattan_per_point_vector = NULL;
