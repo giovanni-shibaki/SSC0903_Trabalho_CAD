@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                MPI_Send(x_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
+                MPI_Send(&x_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
             }
 
             counter++;
@@ -115,7 +115,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                MPI_Send(x_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
+                MPI_Send(&y_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
             }
 
             counter++;
@@ -137,7 +137,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                MPI_Send(x_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
+                MPI_Send(&z_aux, 1, MPI_INT, counter, tag, MPI_COMM_WORLD);
             }
 
             counter++;
@@ -171,19 +171,19 @@ int main(int argc, char *argv[])
     {
         for (int i = 0; i < (num_points_per_node); i++)
         {
-            MPI_Recv(x[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
+            MPI_Recv(&x[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
         }
 
         for (int i = 0; i < (num_points_per_node); i++)
         {
-            MPI_Recv(y[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
+            MPI_Recv(&y[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
         }
         
         for (int i = 0; i < (num_points_per_node); i++)
         {
-            MPI_Recv(z[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
+            MPI_Recv(&z[i], num_points_per_node, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
         }
 
@@ -208,13 +208,6 @@ int main(int argc, char *argv[])
             printf("%d[Z%d] ", z[i], rank);
         }*/
     }
-
-    free(x_aux);
-    x_aux = NULL;
-    free(y_aux);
-    y_aux = NULL;
-    free(z_aux);
-    z_aux = NULL;
 
     // The first part, of sending all the needed information to the processes is finished
     //printf("\n\n\n");
@@ -265,6 +258,7 @@ int main(int argc, char *argv[])
 
     #pragma omp parallel num_threads(num_threads) private(i, j, k, point, manhattan_euclidean_min_max_point, min_manhattan, max_manhattan, min_euclidean, max_euclidean) default(shared)
     {
+        // Calculate the distances and update the global variables
         #pragma omp for reduction(min : local_min_manhattan, local_min_euclidean) reduction(max : local_max_manhattan, local_max_euclidean) \
         reduction(+:sum_min_manhattan, sum_max_manhattan, sum_min_euclidean, sum_max_euclidean)
         for(int i = 0; i < num_points_per_node; i++)
@@ -338,11 +332,13 @@ int main(int argc, char *argv[])
         #pragma omp single
         for (int i = 0; i <= num_nodes; i++)
         {
+            printf("Rank %d will receive values from %d\n", rank, i);
 
             if(i == rank)
                 continue;
-
-            MPI_Recv(points, 3 * num_points_per_node, MPI_INT, i, tag, MPI_COMM_WORLD, &status);
+                
+            MPI_Recv(points, 3 * num_points_per_node, MPI_INT, i, i, MPI_COMM_WORLD, &status);
+            printf("Rank %d received values from %d:\n", rank, i);
 
             // j -> point of the sender
             // k -> point of the receiver
