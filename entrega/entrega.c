@@ -29,6 +29,18 @@
 
 #define abs2(x) ((x) < 0 ? -(x) : (x))
 
+int get_num_points_per_node(int rank, int num_points, int num_nodes, int remainder)
+{
+    int num_points_per_node = num_points / num_nodes;
+
+    // If the division between the number of points and the number of nodes is not exact,
+    // the remainder will be added to the first nodes, so they will have more points to calculate
+    if(rank < remainder)
+        num_points_per_node++;
+    
+    return num_points_per_node;
+}
+
 int main(int argc, char *argv[])
 {
     // Read command line arguments
@@ -52,8 +64,9 @@ int main(int argc, char *argv[])
     MPI_Status status;
     MPI_Comm_size(MPI_COMM_WORLD, &num_nodes);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    int num_points_per_node = num_points / num_nodes;
 
+    int remainder = num_points % num_nodes;
+    int num_points_my_node = get_num_points_per_node(rank, num_points, num_nodes, remainder);
 
     // Global variables -> will be used on the reduce process
     int local_min_manhattan = INT_MAX, sum_min_manhattan = 0;
@@ -62,9 +75,9 @@ int main(int argc, char *argv[])
     double local_max_euclidean = DBL_MIN, sum_max_euclidean = 0.0;
 
     // Node 0 generates x,y and z and distribute alternately to the other nodes
-    int *x = (int *)malloc(sizeof(int) * num_points_per_node);
-    int *y = (int *)malloc(sizeof(int) * num_points_per_node);
-    int *z = (int *)malloc(sizeof(int) * num_points_per_node);
+    int *x = (int *)malloc(sizeof(int) * num_points_my_node);
+    int *y = (int *)malloc(sizeof(int) * num_points_my_node);
+    int *z = (int *)malloc(sizeof(int) * num_points_my_node);
     int x_aux, y_aux, z_aux, counter = 0;
 
     // Rank 0 generate and distribute the numbers between each process
@@ -135,19 +148,19 @@ int main(int argc, char *argv[])
     }
     else
     {
-        for (int i = 0; i < (num_points_per_node); i++)
+        for (int i = 0; i < (num_points_my_node); i++)
         {
             MPI_Recv(&x[i], 1, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
         }
 
-        for (int i = 0; i < (num_points_per_node); i++)
+        for (int i = 0; i < (num_points_my_node); i++)
         {
             MPI_Recv(&y[i], 1, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
         }
         
-        for (int i = 0; i < (num_points_per_node); i++)
+        for (int i = 0; i < (num_points_my_node); i++)
         {
             MPI_Recv(&z[i], 1, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
             fflush(0);
@@ -165,7 +178,7 @@ int main(int argc, char *argv[])
     #pragma omp parallel num_threads(num_threads) private(point)
     {
         #pragma omp for
-        for(int i=0; i < num_points_per_node; i++)
+        for(int i=0; i < num_points_my_node; i++)
         {
             point[0] = x[i];
             point[1] = y[i];
@@ -196,7 +209,14 @@ int main(int argc, char *argv[])
             // j -> point of the sender
             // k -> point of the receiver
 
-            for(int j = 0; j < num_points_per_node; j++)
+            // Calculate the number of points that the node will receive from the node with rank i
+            int num_points_sender = num_points_my_node;
+            if(i < remainder && rank >= remainder)
+                num_points_sender++;
+            else if(i >= remainder && rank < remainder)
+                num_points_sender--;
+
+            for(int j = 0; j < num_points_sender; j++)
             {           
                 MPI_Recv(point, 3, MPI_INT, i, j, MPI_COMM_WORLD, &status);
 
@@ -209,7 +229,7 @@ int main(int argc, char *argv[])
 
                 // Calculate the distances and send them to the node that requested it
                 #pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
-                for(int k = start_k; k < num_points_per_node; k++)
+                for(int k = start_k; k < num_points_my_node; k++)
                 {
                     double manhattan = abs(point[0] - x[k]) + abs(point[1] - y[k]) + abs(point[2] - z[k]);
                     double euclidean = sqrt(pow(point[0] - x[k], 2) + pow(point[1] - y[k], 2) + pow(point[2] - z[k], 2));
@@ -239,7 +259,7 @@ int main(int argc, char *argv[])
         // Calculate the distances and update the global variables. Later, a reduce will be done to get the final result in the node 0
         #pragma omp for reduction(min : local_min_manhattan, local_min_euclidean) reduction(max : local_max_manhattan, local_max_euclidean) \
         reduction(+:sum_min_manhattan, sum_max_manhattan, sum_min_euclidean, sum_max_euclidean)
-        for(int i = 0; i < num_points_per_node; i++)
+        for(int i = 0; i < num_points_my_node; i++)
         {
             min_manhattan = INT_MAX;
             max_manhattan = INT_MIN;
@@ -248,7 +268,7 @@ int main(int argc, char *argv[])
 
             // Calculate the distance to the points that the node already has
             #pragma omp simd reduction(min : min_manhattan) reduction(max : max_manhattan) reduction(min : min_euclidean) reduction(max : max_euclidean)
-            for(int j = i+1; j < num_points_per_node; j++)
+            for(int j = i+1; j < num_points_my_node; j++)
             {
                 int manhattan = abs(x[i] - x[j]) + abs(y[i] - y[j]) + abs(z[i] - z[j]);
                 double euclidean = sqrt(pow(x[i] - x[j], 2) + pow(y[i] - y[j], 2) + pow(z[i] - z[j], 2));
