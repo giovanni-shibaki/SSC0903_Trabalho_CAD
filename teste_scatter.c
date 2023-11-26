@@ -51,10 +51,10 @@ int main(int argc, char *argv[])
             x_master[i] = rand() % 100;
             y_master[i] = rand() % 100;
             z_master[i] = rand() % 100;
-            printf("%d ",x_master[i]);
             if(i%num_points_per_node == 0 && i != 0){
                 printf("\n");
             }
+            printf("%d ",x_master[i]);
         }
         printf("\n\n");
 
