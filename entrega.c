@@ -10,8 +10,8 @@
  * Como compilar e rodar:
  * > make all_seq -> Compila código sequencial dist-seq.c
  * > make all_par -> Compila código paralelo entrega.c
- * > make run_seq N=1000000 SEED=1 -> Roda código sequencial com N = 1000000 e SEED = 1
- * > make run_par N=1000000 SEED=1 NTHREADS=4 -> Roda código paralelo com N = 1000000, SEED = 1 e NTHREADS = 4
+ * > make run_seq N=100 SEED=1 -> Roda código sequencial com N = 100 e SEED = 1
+ * > make run_par N=100 SEED=1 NTHREADS=4 -> Roda código paralelo com N = 100, SEED = 1 e NTHREADS = 4
  * > make clean -> Limpa os executáveis
  *
  */
